@@ -61,30 +61,78 @@ $$\min_{p, q, b_u, b_i} \sum_{(u,i) \in \text{observed}} (r_{ui} - (\mu + b_u + 
 - **随机梯度下降 (SGD)**：一种迭代优化技术，在每一步中，参数（ $P$ 和 $Q$ 的元素）根据损失函数相对于单个随机选择的观察到的评分的梯度进行更新 。梯度下降是一种通过迭代地向函数梯度的负方向调整参数来最小化函数的技术 。在矩阵分解的背景下，对于每个更新步骤，从观察到的评分中随机选择一个评分，并相应地更新用户 $u$ 和项目 $i$ 的潜在因子 。  
 - **交替最小二乘法 (ALS)**：一种迭代方法，通过交替固定一个潜在因子矩阵并使用最小二乘法求解另一个矩阵，反之亦然。这个过程持续到收敛 。ALS通过交替优化用户潜在因子和项目潜在因子来工作，在每次迭代中固定一个并解决另一个 。
 
+### 3. 求解方法
+
+为了找到最小化目标函数的最佳潜在因子矩阵 $P$ 和 $Q$，采用了各种无约束优化算法：
+- **随机梯度下降 (SGD)**：一种迭代优化技术，在每一步中，参数（ $P$ 和 $Q$ 的元素）根据损失函数相对于单个随机选择的观察到的评分的梯度进行更新 。梯度下降是一种通过迭代地向函数梯度的负方向调整参数来最小化函数的技术 。在矩阵分解的背景下，对于每个更新步骤，从观察到的评分中随机选择一个评分，并相应地更新用户 $u$ 和项目 $i$ 的潜在因子 。  
+- **交替最小二乘法 (ALS)**：一种迭代方法，通过交替固定一个潜在因子矩阵并使用最小二乘法求解另一个矩阵，反之亦然。这个过程持续到收敛 。ALS通过交替优化用户潜在因子和项目潜在因子来工作，在每次迭代中固定一个并解决另一个 。
+
 #### 3.1 随机梯度下降
 
 随机梯度下降求解步骤如下：
 
-1. 随机选择一个已知的评分 $(u, i, R_{ui})$
-2. 计算预测评分：$$\hat{r}_{ui} = \mu + b_u + b_i + q_i^T p_u$$
-3. 计算误差：$$e_{ui} = r_{ui} - \hat{r}_{ui}$$
-4. 根据梯度更新参数：
-   - $$b_u \leftarrow b_u + \alpha (e_{ui} - \lambda b_u)$$
-   - $$b_i \leftarrow b_i + \alpha (e_{ui} - \lambda b_i)$$
-   - $$p_u \leftarrow p_u + \alpha (e_{ui} q_i - \lambda p_u)$$
-   - $$q_i \leftarrow q_i + \alpha (e_{ui} q_u - \lambda q_i)$$
-其中 $\alpha$ 是学习率，控制更新步长。
+1. **初始化参数：**
+    - 计算全局平均评分 $μ$ (可以预先计算训练集中所有评分的平均值并固定，或者也作为可学习参数，但通常固定)。    
+    - 随机初始化用户偏置向量 $b_u$​ ∈ $\mathbb{R}^m$ 和项目偏置向量 $b_i​$∈ $\mathbb{R}^n$ (例如，从一个均值为0的小方差正态分布中采样，或者初始化为0)。
+    - 随机初始化用户潜在因子矩阵 $P \in \mathbb{R}^{m \times f}$ 和项目潜在因子矩阵 $Q \in \mathbb{R}^{n \times f}$ (例如，从一个均值为0的小方差正态分布中采样)。$f$ 是潜在因子的数量。
+    - 设定学习率 $α$ > 0 和正则化参数 $λ$ > 0。
+    - 设定最大迭代次数或收敛判据。
+    
+2. **迭代优化：**
+    - **For** `epoch` from 1 to `max_epochs`:
+        - **打乱数据**：将所有已知的评分样本 (u,i,rui​) 的顺序随机打乱。这有助于防止模型在训练过程中陷入局部最优，并提高泛化能力。
+        - **For** each known rating ($u$,$i$,$\hat{r}_{ui}$) in the (shuffled) training set:
+            1. **计算预测评分** $\hat{r}_{ui}$​：$$\hat{r}_{ui} = \mu + b_u + b_i + q_i^T p_u$$
+            2. **计算预测误差** $e_{ui}$ : $$e_{ui} = r_{ui} - \hat{r}_{ui}$$
+            3. **根据梯度更新参数** (目标是最小化对单个样本的贡献)：
+				$b_u \leftarrow b_u + \alpha (e_{ui} - \lambda b_u)$
+				$b_i \leftarrow b_i + \alpha (e_{ui} - \lambda b_i)$
+				$p_u \leftarrow p_u + \alpha (e_{ui} q_i - \lambda p_u)$
+				$q_i \leftarrow q_i + \alpha (e_{ui} p_u - \lambda q_i)$
+
+			4. **评估模型**：在每个 epoch 结束后，计算均方根误差 (RMSE) 来监控模型性能。
+
 
 ### 3.2 交替最小二乘法
 
 交替最小二乘法步骤如下：
 
-1. 初始化：随机初始化 $p$ 和 $q$，以及偏置 $b_u$、$b_i$。设置 $u$。
-2. 固定 $q$，优化 $p$：
-    - 将 $q$ 和 $b_i$ 视为常数，优化 $p$ 和 $b_u$。
-    - 对于每个用户 $u$，求解一个最小二乘问题： $$\min_{p_u, b_u} \sum_{i \in I_u} \left(r_{ui} - (\mu + b_u + b_i + q_i^T p_u)\right)^2$$
-3. 固定 $p$，优化 $q$：
-    - 将 $p$ 和 $b_u$ 视为常数，优化 $q$ 和 $b_i$ 。
-    - 对于每个项目 $i$，求解类似的最小二乘问题。
-4. 迭代：交替执行步骤 2 和 3，直到损失收敛。
-5. 更新偏置：在每次迭代中更新 $b_u$ 和 $b_i$ 。
+1. **初始化参数：**
+    - 计算全局平均评分 $μ$
+    - 初始化用户偏置向量 $b_u$​ 和项目偏置向量 $b_i$​ 为零向量
+    - 随机初始化用户潜在因子矩阵 $P$ 和项目潜在因子矩阵 $Q$
+    - 设定正则化参数 λ>0 。
+    - 设定最大迭代次数
+    - 创建评分矩阵的掩码 `mask`，标记已知评分位置
+
+2. **迭代优化：**
+    - **For** `iteration` from 1 to `self.iterations`:
+    
+        - 固定 $P, b_i, b_u, \mu$，优化 $Q$
+            - **For** each item i=1,…,n:
+                - 获取评价过项目 i 的所有用户索引 `users_i` 及其对应的评分 `ratings_i`。
+                - 计算调整后的评分： `ratings_i_adj = ratings_i - self.b - self.b_u[users_i] - self.b_i[i]`
+                - 令 $P_{U_i}$ 是一个 $|U_i| \times f$ 的矩阵，其行是 $p_u^T$（$u \in \text{users}_i$）
+                - 求解线性方程组 $q_i$：$(P_{U_i}^T P_{U_i} + \lambda I) q_i = P_{U_i}^T \text{ratings\_i\_adj}$：
+                    
+        - 固定 $Q, b_i, b_u, \mu$，优化 $P$
+            - **For** each item i=1,…,n:
+                - 获取用户 u 评价过的所有项目索引 `items_u` 及其对应的评分 `ratings_u`
+                - 计算调整后的评分： `ratings_u_adj = ratings_u - self.b - self.b_u[u] - self.b_i[items_u]`
+                - 令 $Q_{I_u}$ 是一个 $|I_u| \times f$ 的矩阵，其行是 $q_i^T$（$i \in \text{items}_u$）
+                - 求解线性方程组 $q_i$：$(Q_{I_u}^T Q_{I_u} + \lambda I) p_u = Q_{I_u}^T \text{ratings\_u\_adj}$：
+	    
+		- 固定 $P,Q,\mu$，优化偏置项 $b_u$ 和 $b_i$ 
+			- 更新用户偏置 $b_u$：
+				For each user $u = 1,\dots,m$:
+$$
+b_u \leftarrow \frac{\sum\limits_{i \in I_u} (r_{ui} - \mu - b_i - p_u^T q_i)}{|I_u| + \lambda}
+$$
+	        - 更新项目偏置 $b_i$：
+				For each item $i = 1,\dots,n$:
+$$
+b_i \leftarrow \frac{\sum\limits_{i \in I_u} (r_{ui} - \mu - b_u - p_u^T q_i)}{|U_i| + \lambda}
+$$
+		- 检查收敛：
+            - 计算当前的均方根误差 (RMSE) 
+            - 如果达到最大迭代次数，则停止迭代。
